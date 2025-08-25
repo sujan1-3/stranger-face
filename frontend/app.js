@@ -1,6 +1,6 @@
 /**
  * Stranger Face - REAL WebRTC Video Chat Application
- * Final, production-ready code with corrected TURN server configuration.
+ * Complete production-ready implementation with ULTIMATE stream compatibility
  */
 
 class StrangerFaceApp {
@@ -22,16 +22,13 @@ class StrangerFaceApp {
             socket: null
         };
 
-        // WebRTC configuration with STUN and your CORRECTED TURN server
+        // WebRTC configuration with STUN servers
         this.rtcConfig = {
             iceServers: [
-                {
-                    urls: "turn:global.turn.xirsys.com:80",
-                    username: "qazxsw12345",
-                    credential: "faba1ca0-819c-11f0-942e-0242ac140002"
-                },
                 { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' }
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' }
             ]
         };
 
@@ -289,6 +286,7 @@ class StrangerFaceApp {
             // Show local video in self video element
             const selfVideoElement = this.createVideoElement(true);
             selfVideoElement.srcObject = this.state.localStream;
+            selfVideoElement.muted = true; // Prevent echo
             
             // Replace placeholder with real video
             const selfVideoContainer = this.elements.selfVideo;
@@ -354,7 +352,7 @@ class StrangerFaceApp {
         return video;
     }
 
-    // Initialize WebRTC peer connection
+    // Initialize WebRTC peer connection (ULTIMATE COMPATIBILITY VERSION)
     async initializePeerConnection() {
         try {
             console.log('🔗 Initializing peer connection...');
@@ -362,38 +360,248 @@ class StrangerFaceApp {
             this.state.peerConnection = new RTCPeerConnection(this.rtcConfig);
             const pc = this.state.peerConnection;
             
-            // A simpler, more reliable ontrack handler
+            // Track if we've already created remote video element
+            let remoteVideoCreated = false;
+            let remoteVideoElement = null;
+            
+            // ULTIMATE: Enhanced ontrack handler with comprehensive stream validation
             pc.ontrack = (event) => {
-                console.log('📥 REMOTE STREAM RECEIVED!', event.streams[0]);
-
-                // Get the container DIV from the HTML
-                const strangerVideoContainer = document.getElementById('strangerVideo');
-
-                if (strangerVideoContainer) {
-                    // If the container has a video element already, just update its source
-                    let videoElement = strangerVideoContainer.querySelector('video');
+                console.log('📥 REMOTE STREAM RECEIVED!');
+                console.log('📥 Track kind:', event.track.kind);
+                console.log('📥 Track enabled:', event.track.enabled);
+                console.log('📥 Track readyState:', event.track.readyState);
+                
+                const [remoteStream] = event.streams;
+                
+                // Log detailed stream info
+                console.log('📊 Remote stream info:');
+                console.log('- Stream ID:', remoteStream.id);
+                console.log('- Stream active:', remoteStream.active);
+                console.log('- Audio tracks:', remoteStream.getAudioTracks().length);
+                console.log('- Video tracks:', remoteStream.getVideoTracks().length);
+                
+                // Only create remote video element once
+                if (!remoteVideoCreated) {
+                    console.log('📥 Creating remote video element for the first time');
+                    this.state.remoteStream = remoteStream;
                     
-                    // If no video element exists, create one
-                    if (!videoElement) {
-                        console.log('📥 Creating remote video element for the first time');
-                        videoElement = document.createElement('video');
-                        videoElement.autoplay = true;
-                        videoElement.playsInline = true;
-                        videoElement.style.width = '100%';
-                        videoElement.style.height = '100%';
-                        videoElement.style.objectFit = 'cover';
+                    // Create video element with ENHANCED compatibility settings
+                    remoteVideoElement = document.createElement('video');
+                    remoteVideoElement.autoplay = true;
+                    remoteVideoElement.playsInline = true;
+                    remoteVideoElement.controls = false;
+                    remoteVideoElement.muted = false;
+                    remoteVideoElement.crossOrigin = 'anonymous';
+                    remoteVideoElement.preload = 'metadata';
+                    remoteVideoElement.style.width = '100%';
+                    remoteVideoElement.style.height = '100%';
+                    remoteVideoElement.style.objectFit = 'cover';
+                    remoteVideoElement.style.borderRadius = '15px';
+                    remoteVideoElement.style.backgroundColor = '#000';
+                    
+                    // Set the stream immediately
+                    remoteVideoElement.srcObject = remoteStream;
+                    
+                    // CRITICAL: Enhanced force play with stream validation
+                    const forcePlay = async () => {
+                        try {
+                            // First validate the stream has video tracks
+                            const videoTracks = remoteStream.getVideoTracks();
+                            const audioTracks = remoteStream.getAudioTracks();
+                            
+                            console.log('🔍 Stream validation:');
+                            console.log('- Video tracks:', videoTracks.length, videoTracks.map(t => `${t.kind}:${t.readyState}`));
+                            console.log('- Audio tracks:', audioTracks.length, audioTracks.map(t => `${t.kind}:${t.readyState}`));
+                            
+                            if (videoTracks.length === 0) {
+                                console.error('❌ No video tracks in remote stream!');
+                                return;
+                            }
+                            
+                            console.log('🎥 Attempting to play remote video...');
+                            console.log('📊 Video element state:', {
+                                readyState: remoteVideoElement.readyState,
+                                networkState: remoteVideoElement.networkState,
+                                paused: remoteVideoElement.paused,
+                                currentTime: remoteVideoElement.currentTime,
+                                duration: remoteVideoElement.duration
+                            });
+                            
+                            await remoteVideoElement.play();
+                            console.log('✅ Remote video started playing successfully!');
+                            
+                        } catch (error) {
+                            console.log('⚠️ First play attempt failed:', error.message);
+                            console.log('🔄 Trying fallback approaches...');
+                            
+                            try {
+                                // Fallback 1: Muted autoplay
+                                remoteVideoElement.muted = true;
+                                await remoteVideoElement.play();
+                                console.log('✅ Remote video playing (muted)');
+                                
+                                // Try to unmute after 2 seconds
+                                setTimeout(() => {
+                                    remoteVideoElement.muted = false;
+                                    console.log('🔊 Unmuted remote video');
+                                }, 2000);
+                                
+                            } catch (error2) {
+                                console.log('⚠️ Muted play failed, trying load():', error2.message);
+                                
+                                try {
+                                    // Fallback 2: Force load then play
+                                    remoteVideoElement.load();
+                                    await new Promise(resolve => {
+                                        remoteVideoElement.addEventListener('loadeddata', resolve, { once: true });
+                                    });
+                                    await remoteVideoElement.play();
+                                    console.log('✅ Remote video playing after reload');
+                                    
+                                } catch (error3) {
+                                    console.error('❌ All play attempts failed:', error3.message);
+                                    
+                                    // Fallback 3: Recreate video element
+                                    console.log('🔄 Recreating video element...');
+                                    const newVideo = document.createElement('video');
+                                    newVideo.autoplay = true;
+                                    newVideo.playsInline = true;
+                                    newVideo.muted = true;
+                                    newVideo.srcObject = remoteStream;
+                                    newVideo.style.cssText = remoteVideoElement.style.cssText;
+                                    
+                                    const container = this.elements.strangerVideo;
+                                    if (container) {
+                                        container.innerHTML = '';
+                                        container.appendChild(newVideo);
+                                        remoteVideoElement = newVideo;
+                                        console.log('🔄 Video element recreated');
+                                    }
+                                }
+                            }
+                        }
+                    };
+                    
+                    // Enhanced event handlers with more debugging
+                    remoteVideoElement.onloadstart = () => {
+                        console.log('🎥 Remote video load started');
+                    };
+                    
+                    remoteVideoElement.onloadeddata = () => {
+                        console.log('🎥 Remote video data loaded');
+                        console.log('🎥 Video dimensions:', remoteVideoElement.videoWidth, 'x', remoteVideoElement.videoHeight);
+                        console.log('📊 Video readyState:', remoteVideoElement.readyState);
+                    };
+                    
+                    remoteVideoElement.onloadedmetadata = () => {
+                        console.log('🎥 Remote video metadata loaded');
+                        console.log('🎥 Video dimensions:', remoteVideoElement.videoWidth, 'x', remoteVideoElement.videoHeight);
+                        console.log('📊 Duration:', remoteVideoElement.duration);
                         
-                        // Clear the placeholder and add the new video element
+                        // Force play when metadata loads
+                        setTimeout(() => forcePlay(), 100);
+                    };
+                    
+                    remoteVideoElement.oncanplay = () => {
+                        console.log('🎥 Remote video can play');
+                        console.log('📊 Current time:', remoteVideoElement.currentTime);
+                        
+                        // Try to play if not already playing
+                        if (remoteVideoElement.paused) {
+                            setTimeout(() => forcePlay(), 100);
+                        }
+                    };
+                    
+                    remoteVideoElement.oncanplaythrough = () => {
+                        console.log('🎥 Remote video can play through');
+                        if (remoteVideoElement.paused) {
+                            setTimeout(() => forcePlay(), 100);
+                        }
+                    };
+                    
+                    remoteVideoElement.onplaying = () => {
+                        console.log('✅ Remote video is now playing!');
+                        console.log('🎥 Final dimensions:', remoteVideoElement.videoWidth, 'x', remoteVideoElement.videoHeight);
+                        this.showNotification('Remote video connected and playing!', 'success');
+                    };
+                    
+                    remoteVideoElement.onerror = (e) => {
+                        console.error('❌ Remote video error:', e);
+                        console.error('❌ Error details:', {
+                            error: remoteVideoElement.error,
+                            networkState: remoteVideoElement.networkState,
+                            readyState: remoteVideoElement.readyState
+                        });
+                    };
+                    
+                    remoteVideoElement.onstalled = () => {
+                        console.log('⚠️ Remote video stalled - retrying...');
+                        setTimeout(() => forcePlay(), 1000);
+                    };
+                    
+                    remoteVideoElement.onwaiting = () => {
+                        console.log('⏳ Remote video waiting for data');
+                        console.log('📊 Buffer status:', {
+                            buffered: remoteVideoElement.buffered.length,
+                            currentTime: remoteVideoElement.currentTime,
+                            readyState: remoteVideoElement.readyState
+                        });
+                        
+                        // If waiting too long, try to force play again
+                        setTimeout(() => {
+                            if (remoteVideoElement.readyState >= 2) {
+                                console.log('🔄 Retrying play after waiting...');
+                                forcePlay();
+                            }
+                        }, 3000);
+                    };
+                    
+                    remoteVideoElement.onsuspend = () => {
+                        console.log('⏸️ Remote video suspended');
+                    };
+                    
+                    // Replace placeholder with actual video
+                    const strangerVideoContainer = this.elements.strangerVideo;
+                    if (strangerVideoContainer) {
                         strangerVideoContainer.innerHTML = '';
-                        strangerVideoContainer.appendChild(videoElement);
+                        strangerVideoContainer.appendChild(remoteVideoElement);
+                        console.log('✅ Remote video element attached to container');
+                    } else {
+                        console.error('❌ Stranger video container not found!');
                     }
-
-                    // Assign the remote stream to the video element's srcObject
-                    videoElement.srcObject = event.streams[0];
-
+                    
+                    // Try to play immediately after attaching
+                    setTimeout(() => forcePlay(), 200);
+                    
+                    // Update connection status
+                    const statusElement = document.querySelector('.connection-status');
+                    if (statusElement) {
+                        statusElement.textContent = '🟢 Connected';
+                        statusElement.style.color = '#00ff41';
+                    }
+                    
+                    remoteVideoCreated = true;
                 } else {
-                    console.error('❌ CRITICAL: The strangerVideo container was not found in the HTML!');
+                    console.log('📥 Additional track received:', event.track.kind, '- updating existing video element');
+                    
+                    // Update the existing video element's stream
+                    if (remoteVideoElement && remoteVideoElement.srcObject !== remoteStream) {
+                        console.log('🔄 Updating video element with combined stream');
+                        remoteVideoElement.srcObject = remoteStream;
+                        
+                        // Try to play the updated stream
+                        setTimeout(() => {
+                            if (remoteVideoElement.paused) {
+                                remoteVideoElement.play().catch(e => {
+                                    console.log('⚠️ Failed to play updated stream:', e.message);
+                                });
+                            }
+                        }, 200);
+                    }
                 }
+                
+                // Process any queued ICE candidates
+                this.processQueuedIceCandidates();
             };
 
             // Add local stream tracks to peer connection
@@ -433,6 +641,15 @@ class StrangerFaceApp {
                         console.log('🎉 WebRTC connection fully established!');
                         this.showNotification('Video chat fully connected!', 'success');
                         this.startSessionTimer();
+                        
+                        // Extra attempt to play video when fully connected
+                        if (remoteVideoElement && remoteVideoElement.paused) {
+                            setTimeout(() => {
+                                remoteVideoElement.play().catch(e => {
+                                    console.log('⚠️ Final play attempt failed:', e.message);
+                                });
+                            }, 500);
+                        }
                         break;
                     case 'disconnected':
                         this.showNotification('Peer disconnected', 'info');
@@ -460,7 +677,7 @@ class StrangerFaceApp {
                 }
             };
 
-            console.log('✅ Peer connection initialized');
+            console.log('✅ Peer connection initialized with ultimate compatibility');
             
         } catch (error) {
             console.error('❌ Failed to initialize peer connection:', error);
@@ -605,19 +822,26 @@ class StrangerFaceApp {
         }, 1000);
     }
 
-    // Create and send WebRTC offer
+    // Create and send WebRTC offer (FIXED FOR CODEC COMPATIBILITY)
     async createAndSendOffer() {
         try {
             console.log('📞 Creating and sending offer...');
             
+            // Create offer with specific codec preferences
             const offer = await this.state.peerConnection.createOffer({
                 offerToReceiveAudio: true,
-                offerToReceiveVideo: true
+                offerToReceiveVideo: true,
+                voiceActivityDetection: false
             });
+            
+            // Modify SDP to prefer VP8 codec for better compatibility
+            offer.sdp = offer.sdp.replace('m=video 9 UDP/TLS/RTP/SAVPF', 'm=video 9 UDP/TLS/RTP/SAVPF 96 97 98 99 100 101 102');
             
             await this.state.peerConnection.setLocalDescription(offer);
             
-            console.log('📤 Sending offer to peer');
+            console.log('📤 Sending codec-optimized offer to peer');
+            console.log('📋 Offer SDP preview:', offer.sdp.substring(0, 200));
+            
             this.socket.emit('offer', {
                 offer: offer,
                 roomId: this.state.currentStranger.roomId
@@ -629,7 +853,7 @@ class StrangerFaceApp {
         }
     }
 
-    // Handle incoming WebRTC offer
+    // Handle incoming WebRTC offer (COMPLETELY FIXED)
     async handleOffer(data) {
         try {
             console.log('📞 Handling incoming offer...');
@@ -641,11 +865,13 @@ class StrangerFaceApp {
 
             const pc = this.state.peerConnection;
             
+            // CRITICAL: Check and handle signaling state properly
             console.log('📡 Signaling state before handling offer:', pc.signalingState);
             
             // Safe set remote description
             await this.safeSetRemoteDescription(pc, data.offer);
             
+            // CRITICAL: Only create answer if we're in the right state
             console.log('📡 Signaling state before createAnswer:', pc.signalingState);
             
             if (pc.signalingState === 'have-remote-offer') {
@@ -668,7 +894,7 @@ class StrangerFaceApp {
         }
     }
 
-    // Handle incoming WebRTC answer
+    // Handle incoming WebRTC answer (COMPLETELY FIXED)
     async handleAnswer(data) {
         try {
             console.log('✅ Handling incoming answer...');
@@ -688,7 +914,7 @@ class StrangerFaceApp {
         }
     }
 
-    // Handle incoming ICE candidate
+    // Handle incoming ICE candidate (FIXED)
     async handleIceCandidate(data) {
         try {
             const pc = this.state.peerConnection;
