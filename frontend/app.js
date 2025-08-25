@@ -1,11 +1,11 @@
 /**
- * Stranger Face - WebRTC Video Chat with ICE-Synchronized Remote Video
- * Fixes: readyState 0 issue, autoplay restrictions, timing problems
+ * Stranger Face - WebRTC with ICE-Synchronized Video + Autoplay Handling
+ * Fixes: Browser autoplay restrictions, premature video attachment, timing issues
  */
 
 class StrangerFaceApp {
     constructor() {
-        console.log('🚀 Initializing Stranger Face with ICE-Sync Video...');
+        console.log('🚀 Initializing Stranger Face with ICE-Sync + Autoplay Fix...');
         
         this.state = {
             currentView: 'landing',
@@ -19,14 +19,20 @@ class StrangerFaceApp {
             currentStranger: null
         };
 
-        // Will be filled from /ice endpoint
-        this.rtcConfig = { iceServers: [] };
+        // WebRTC configuration
+        this.rtcConfig = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]
+        };
+
         this.queuedIceCandidates = [];
         
-        // Critical state tracking
-        this.iceConnected = false;
+        // CRITICAL: Track ICE and video states separately
+        this.iceConnectionReady = false;
         this.remoteVideoElement = null;
-        this.relayFallbackTimer = null;
+        this.videoAttachmentAttempted = false;
 
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', () => this.init());
@@ -36,12 +42,12 @@ class StrangerFaceApp {
     }
 
     async init() {
-        console.log('🎌 Starting REAL WebRTC with ICE-Sync...');
+        console.log('🎌 Starting with ICE-synchronized video...');
         this.cacheElements();
         await this.initializeSocket();
         this.setupEventListeners();
         this.showView('landing');
-        console.log('✅ Stranger Face ready with enhanced video handling!');
+        console.log('✅ Ready with autoplay fix!');
     }
 
     cacheElements() {
@@ -71,23 +77,16 @@ class StrangerFaceApp {
             this.socket = io('https://stranger-face-backend.onrender.com', {
                 transports: ['websocket', 'polling'],
                 timeout: 20000,
-                reconnection: true,
-                reconnectionAttempts: 5,
-                reconnectionDelay: 1000
+                reconnection: true
             });
 
             this.socket.on('connect', () => {
-                console.log('✅ Connected to backend server!');
+                console.log('✅ Connected to backend!');
                 this.showNotification('Connected to server', 'success');
             });
 
-            this.socket.on('disconnect', (reason) => {
-                console.log('❌ Disconnected:', reason);
-                this.showNotification('Disconnected from server', 'error');
-            });
-
             this.socket.on('waiting-for-match', () => {
-                this.updateSearchStatus('Searching for someone awesome...');
+                this.updateSearchStatus('Searching...');
             });
 
             this.socket.on('match-found', (data) => {
@@ -95,30 +94,22 @@ class StrangerFaceApp {
                 this.handleRealMatchFound(data);
             });
 
-            // WebRTC signaling events
+            // WebRTC signaling
             this.socket.on('offer', (data) => this.handleOffer(data));
             this.socket.on('answer', (data) => this.handleAnswer(data));
             this.socket.on('ice-candidate', (data) => this.handleIceCandidate(data));
             this.socket.on('partner-disconnected', () => this.handlePartnerDisconnected());
-            this.socket.on('error', (error) => {
-                console.error('❌ Socket error:', error);
-                this.showNotification(error.message || 'Server error', 'error');
-            });
 
         } catch (error) {
-            console.error('❌ Socket initialization failed:', error);
-            this.showNotification('Failed to connect to server', 'error');
+            console.error('❌ Socket failed:', error);
         }
     }
 
     setupEventListeners() {
-        // Get Started
         this.elements.getStartedBtn?.addEventListener('click', () => {
-            console.log('🚀 Get Started clicked!');
             this.showView('hobbySelection');
         });
 
-        // Hobby selection
         this.elements.hobbyCards.forEach(card => {
             card.addEventListener('click', async () => {
                 const hobbyId = card.dataset.hobby;
@@ -126,13 +117,11 @@ class StrangerFaceApp {
                 
                 console.log(`🎯 Selected hobby: ${hobbyName}`);
 
-                // Visual feedback
                 this.elements.hobbyCards.forEach(c => c.classList.remove('selected'));
                 card.classList.add('selected');
                 
                 this.state.selectedHobby = { id: hobbyId, name: hobbyName };
 
-                // Request media access
                 const mediaGranted = await this.requestMediaAccess();
                 if (!mediaGranted) {
                     card.classList.remove('selected');
@@ -140,151 +129,90 @@ class StrangerFaceApp {
                     return;
                 }
 
-                // Start search
                 setTimeout(() => this.startRealSearch(), 800);
             });
         });
 
-        // Controls
         this.elements.nextBtn?.addEventListener('click', () => this.handleNextStranger());
         this.elements.muteBtn?.addEventListener('click', () => this.handleMuteToggle());
         this.elements.reportBtn?.addEventListener('click', () => this.handleReportUser());
-        
-        // Emoji reactions
-        this.elements.emojiButtons.forEach(btn => {
-            btn.addEventListener('click', () => {
-                const emoji = btn.dataset.emoji;
-                this.sendEmojiReaction(emoji);
-            });
-        });
     }
 
     async requestMediaAccess() {
         try {
-            console.log('🎥 Requesting camera and microphone...');
+            console.log('🎥 Requesting media access...');
             
             const constraints = {
                 video: {
-                    width: { ideal: 1280, max: 1920 },
-                    height: { ideal: 720, max: 1080 },
-                    facingMode: 'user',
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
                     frameRate: { ideal: 30 }
                 },
                 audio: {
                     echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true,
-                    sampleRate: 48000
+                    noiseSuppression: true
                 }
             };
 
             this.state.localStream = await navigator.mediaDevices.getUserMedia(constraints);
             
-            // Display local video
             const localVideo = document.createElement('video');
             localVideo.autoplay = true;
             localVideo.playsInline = true;
-            localVideo.muted = true; // Prevent echo
-            localVideo.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:50%;background:#000;';
+            localVideo.muted = true;
+            localVideo.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:50%;';
             localVideo.srcObject = this.state.localStream;
             
             this.elements.selfVideo.innerHTML = '';
             this.elements.selfVideo.appendChild(localVideo);
             
-            console.log('✅ Camera and microphone ready!');
-            this.showNotification('Camera ready!', 'success');
+            console.log('✅ Media access granted!');
             return true;
             
         } catch (error) {
             console.error('❌ Media access denied:', error);
-            let message = 'Camera access required for video chat';
-            if (error.name === 'NotAllowedError') {
-                message = 'Please allow camera access and refresh';
-            }
-            this.showNotification(message, 'error');
+            this.showNotification('Camera access required', 'error');
             return false;
         }
     }
 
-    // Fetch ICE servers from backend (uses Xirsys TURN)
-    async fetchIceServers() {
+    // CRITICAL: Initialize peer connection with ICE-synchronized video attachment
+    async initializePeerConnection() {
         try {
-            console.log('🧊 Fetching TURN servers from backend...');
-            const response = await fetch('/ice');
-            if (!response.ok) throw new Error('ICE fetch failed');
+            console.log('🔗 Initializing peer connection with ICE sync...');
             
-            const data = await response.json();
-            this.rtcConfig.iceServers = data.iceServers || [{ urls: 'stun:stun.l.google.com:19302' }];
-            console.log(`✅ Got ${this.rtcConfig.iceServers.length} ICE servers (includes TURN)`);
-            
-        } catch (error) {
-            console.error('❌ ICE server fetch failed:', error);
-            // Fallback to STUN only
-            this.rtcConfig.iceServers = [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' }
-            ];
-        }
-    }
-
-    // Initialize peer connection with ICE-synchronized video attachment
-    async initializePeerConnection(forceRelay = false) {
-        try {
-            console.log('🔗 Initializing peer connection...');
-            
-            // Fetch ICE servers if not already done
-            if (!this.rtcConfig.iceServers?.length) {
-                await this.fetchIceServers();
-            }
-
-            // Create peer connection with optional relay-only mode
-            const config = {
-                ...this.rtcConfig,
-                iceTransportPolicy: forceRelay ? 'relay' : 'all'
-            };
-            
-            this.state.peerConnection = new RTCPeerConnection(config);
+            this.state.peerConnection = new RTCPeerConnection(this.rtcConfig);
             const pc = this.state.peerConnection;
             
             // Reset state
-            this.iceConnected = false;
+            this.iceConnectionReady = false;
             this.remoteVideoElement = null;
+            this.videoAttachmentAttempted = false;
 
-            // CRITICAL: ICE connection state handler - only attach video when ICE is ready
+            // CRITICAL: ICE connection state handler - WAIT for connection before video
             pc.oniceconnectionstatechange = () => {
                 const state = pc.iceConnectionState;
                 console.log('🧊 ICE connection state:', state);
                 
                 if (state === 'connected' || state === 'completed') {
-                    console.log('✅ ICE connection established!');
-                    this.iceConnected = true;
+                    console.log('✅ ICE CONNECTION READY - can now attach video!');
+                    this.iceConnectionReady = true;
                     
-                    // Cancel relay fallback timer
-                    if (this.relayFallbackTimer) {
-                        clearTimeout(this.relayFallbackTimer);
-                        this.relayFallbackTimer = null;
-                    }
-                    
-                    // Try to play remote video if stream is ready
-                    if (this.state.remoteStream && this.remoteVideoElement) {
-                        console.log('🎥 ICE ready - attempting video playback...');
-                        this.attachAndPlayRemoteVideo();
-                    }
+                    // Try to attach video now that ICE is ready
+                    this.tryAttachRemoteVideo();
                     
                 } else if (state === 'failed') {
                     console.log('❌ ICE connection failed');
                     this.showNotification('Connection failed', 'error');
                 } else if (state === 'disconnected') {
-                    console.log('⚠️ ICE disconnected');
-                    this.iceConnected = false;
+                    this.iceConnectionReady = false;
                 }
             };
 
-            // CRITICAL: ontrack handler - collect stream but don't play until ICE ready
+            // CRITICAL: ontrack handler - collect stream but DON'T attach until ICE ready
             pc.ontrack = (event) => {
                 console.log('📥 Remote stream received!');
-                console.log('📥 Track kind:', event.track.kind);
-                console.log('📥 Track state:', event.track.readyState);
+                console.log('📥 Track kind:', event.track.kind, 'enabled:', event.track.enabled);
                 
                 const [remoteStream] = event.streams;
                 this.state.remoteStream = remoteStream;
@@ -292,53 +220,20 @@ class StrangerFaceApp {
                 // Log stream details
                 const videoTracks = remoteStream.getVideoTracks();
                 const audioTracks = remoteStream.getAudioTracks();
-                console.log(`📊 Remote stream: ${videoTracks.length} video, ${audioTracks.length} audio tracks`);
+                console.log(`📊 Stream: ${videoTracks.length} video, ${audioTracks.length} audio tracks`);
                 
-                // Create video element if not exists
+                // Create video element if not exists (but don't attach stream yet)
                 if (!this.remoteVideoElement) {
-                    console.log('🎥 Creating remote video element...');
-                    this.remoteVideoElement = document.createElement('video');
-                    this.remoteVideoElement.autoplay = true;
-                    this.remoteVideoElement.playsInline = true;
-                    this.remoteVideoElement.controls = false;
-                    this.remoteVideoElement.muted = false; // Allow audio
-                    this.remoteVideoElement.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:15px;background:#000;';
-                    
-                    // Enhanced event logging
-                    this.remoteVideoElement.onloadedmetadata = () => {
-                        console.log('🎥 Remote video metadata loaded');
-                        console.log(`🎥 Dimensions: ${this.remoteVideoElement.videoWidth}x${this.remoteVideoElement.videoHeight}`);
-                    };
-                    
-                    this.remoteVideoElement.oncanplay = () => {
-                        console.log('🎥 Remote video can play');
-                    };
-                    
-                    this.remoteVideoElement.onplaying = () => {
-                        console.log('✅ Remote video is now playing!');
-                        this.showNotification('Remote video connected!', 'success');
-                    };
-                    
-                    this.remoteVideoElement.onwaiting = () => {
-                        console.log('⏳ Remote video waiting for data');
-                    };
-                    
-                    this.remoteVideoElement.onerror = (e) => {
-                        console.error('❌ Remote video error:', e);
-                    };
+                    console.log('🎥 Creating remote video element (but not attaching stream yet)...');
+                    this.remoteVideoElement = this.createRemoteVideoElement();
                     
                     // Add to container
                     this.elements.strangerVideo.innerHTML = '';
                     this.elements.strangerVideo.appendChild(this.remoteVideoElement);
                 }
                 
-                // CRITICAL: Only attach and play if ICE is ready
-                if (this.iceConnected) {
-                    console.log('🎥 ICE already ready - attaching stream immediately');
-                    this.attachAndPlayRemoteVideo();
-                } else {
-                    console.log('⏳ ICE not ready yet - will attach stream when ICE connects');
-                }
+                // Try to attach video if ICE is already ready
+                this.tryAttachRemoteVideo();
                 
                 // Process queued ICE candidates
                 this.processQueuedIceCandidates();
@@ -346,9 +241,7 @@ class StrangerFaceApp {
 
             // Add local tracks
             if (this.state.localStream) {
-                console.log('📤 Adding local tracks...');
                 this.state.localStream.getTracks().forEach(track => {
-                    console.log(`📤 Adding ${track.kind} track`);
                     pc.addTrack(track, this.state.localStream);
                 });
             }
@@ -356,10 +249,7 @@ class StrangerFaceApp {
             // ICE candidate handler
             pc.onicecandidate = (event) => {
                 if (event.candidate && this.socket) {
-                    console.log('🧊 Sending ICE candidate');
                     this.socket.emit('ice-candidate', { candidate: event.candidate });
-                } else if (!event.candidate) {
-                    console.log('🧊 ICE gathering completed');
                 }
             };
 
@@ -368,109 +258,177 @@ class StrangerFaceApp {
                 const state = pc.connectionState;
                 console.log('🔗 Connection state:', state);
                 
-                switch (state) {
-                    case 'connecting':
-                        this.showNotification('Connecting...', 'info');
-                        break;
-                    case 'connected':
-                        console.log('🎉 WebRTC connection established!');
-                        this.showNotification('Video chat connected!', 'success');
-                        this.startSessionTimer();
-                        break;
-                    case 'disconnected':
-                        this.showNotification('Peer disconnected', 'info');
-                        break;
-                    case 'failed':
-                        this.showNotification('Connection failed', 'error');
-                        break;
+                if (state === 'connected') {
+                    this.showNotification('Video chat connected!', 'success');
+                    this.startSessionTimer();
                 }
             };
 
-            // Set up relay fallback timer (7 seconds)
-            if (!forceRelay) {
-                this.relayFallbackTimer = setTimeout(async () => {
-                    if (!this.iceConnected) {
-                        console.log('⚡ Relay fallback: ICE not connected, trying TURN-only...');
-                        try {
-                            pc.close();
-                        } catch (e) {}
-                        await this.initializePeerConnection(true);
-                        await this.createAndSendOffer();
-                    }
-                }, 7000);
-            }
-
-            console.log('✅ Peer connection initialized with ICE-sync video');
+            console.log('✅ Peer connection initialized with ICE sync');
             
         } catch (error) {
-            console.error('❌ Peer connection initialization failed:', error);
-            this.showNotification('Failed to initialize connection', 'error');
+            console.error('❌ Peer connection failed:', error);
         }
     }
 
-    // CRITICAL: Attach stream and play video (only called when ICE is ready)
-    async attachAndPlayRemoteVideo() {
-        if (!this.remoteVideoElement || !this.state.remoteStream) {
-            console.log('⚠️ Cannot attach video - element or stream missing');
+    // Create video element with proper configuration for autoplay handling
+    createRemoteVideoElement() {
+        const video = document.createElement('video');
+        video.autoplay = true;
+        video.playsInline = true; // CRITICAL for mobile Safari
+        video.controls = false;
+        video.muted = true; // Start muted for autoplay compliance
+        video.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:15px;background:#000;';
+        
+        // Enhanced event handlers
+        video.onloadedmetadata = () => {
+            console.log('🎥 Remote video metadata loaded');
+            console.log(`🎥 Dimensions: ${video.videoWidth}x${video.videoHeight}`);
+        };
+        
+        video.oncanplay = () => {
+            console.log('🎥 Remote video can play');
+        };
+        
+        video.onplaying = () => {
+            console.log('✅ Remote video is playing!');
+            this.showNotification('Remote video playing!', 'success');
+            
+            // Unmute after 2 seconds if playing successfully
+            setTimeout(() => {
+                if (!video.paused) {
+                    video.muted = false;
+                    console.log('🔊 Unmuted remote video');
+                }
+            }, 2000);
+        };
+        
+        video.onwaiting = () => {
+            console.log('⏳ Remote video waiting for data');
+        };
+        
+        video.onerror = (e) => {
+            console.error('❌ Remote video error:', e);
+        };
+        
+        return video;
+    }
+
+    // CRITICAL: Only attach stream when BOTH conditions are met:
+    // 1. ICE connection is ready (connected/completed)  
+    // 2. Remote stream is available
+    async tryAttachRemoteVideo() {
+        if (!this.iceConnectionReady) {
+            console.log('⏳ ICE not ready yet - waiting before attaching video');
+            return;
+        }
+        
+        if (!this.state.remoteStream) {
+            console.log('⏳ Remote stream not available yet - waiting');
+            return;
+        }
+        
+        if (!this.remoteVideoElement) {
+            console.log('⏳ Remote video element not created yet - waiting');
+            return;
+        }
+        
+        if (this.videoAttachmentAttempted) {
+            console.log('📹 Video attachment already attempted');
             return;
         }
 
+        console.log('🎬 CONDITIONS MET - Attaching remote stream and playing video!');
+        this.videoAttachmentAttempted = true;
+        
         try {
-            console.log('🔗 Attaching remote stream to video element...');
+            // Attach stream
             this.remoteVideoElement.srcObject = this.state.remoteStream;
+            console.log('🔗 Remote stream attached to video element');
             
-            // Robust play with fallback to muted
-            await this.playVideoWithFallback(this.remoteVideoElement);
+            // Wait a moment for the stream to be processed
+            await new Promise(resolve => setTimeout(resolve, 200));
+            
+            // Robust play with multiple attempts
+            await this.playVideoWithRetry(this.remoteVideoElement);
             
         } catch (error) {
-            console.error('❌ Failed to attach remote stream:', error);
+            console.error('❌ Failed to attach/play remote video:', error);
+            this.showNotification('Video playback failed', 'error');
         }
     }
 
-    // Robust video play with muted fallback
-    async playVideoWithFallback(videoElement) {
-        try {
-            console.log('▶️ Attempting to play remote video...');
-            console.log(`📊 Video state: readyState=${videoElement.readyState}, networkState=${videoElement.networkState}`);
-            
-            await videoElement.play();
-            console.log('✅ Remote video playing successfully!');
-            
-        } catch (error) {
-            console.log('⚠️ First play attempt failed, trying muted playback:', error.message);
-            
+    // Robust video play with autoplay policy compliance
+    async playVideoWithRetry(videoElement, maxRetries = 3) {
+        console.log('▶️ Attempting to play video with retry logic...');
+        
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                // Fallback: muted autoplay
+                console.log(`🎮 Play attempt ${attempt}/${maxRetries}`);
+                console.log(`📊 Video state: readyState=${videoElement.readyState}, paused=${videoElement.paused}`);
+                
+                // Ensure video is muted for autoplay compliance
                 videoElement.muted = true;
+                
                 await videoElement.play();
-                console.log('✅ Remote video playing (muted)');
+                console.log('✅ Video playing successfully!');
+                return; // Success!
                 
-                // Unmute after 2 seconds
-                setTimeout(() => {
-                    videoElement.muted = false;
-                    console.log('🔊 Unmuted remote video');
-                }, 2000);
+            } catch (error) {
+                console.log(`⚠️ Play attempt ${attempt} failed:`, error.message);
                 
-            } catch (mutedError) {
-                console.error('❌ Even muted playback failed:', mutedError.message);
-                
-                // Last resort: reload the element
-                try {
-                    videoElement.load();
-                    console.log('🔄 Reloaded video element');
-                } catch (loadError) {
-                    console.error('❌ Video element reload failed:', loadError);
+                if (attempt === maxRetries) {
+                    console.error('❌ All play attempts failed');
+                    
+                    // Last resort: show user interaction prompt
+                    this.showPlayButton();
+                    return;
                 }
+                
+                // Wait before retry
+                await new Promise(resolve => setTimeout(resolve, 500 * attempt));
             }
         }
     }
 
+    // Show manual play button for user interaction (autoplay policy compliance)
+    showPlayButton() {
+        console.log('🎯 Showing manual play button for user interaction');
+        
+        const playButton = document.createElement('button');
+        playButton.textContent = '▶️ Click to Play Video';
+        playButton.style.cssText = `
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            padding: 1rem 2rem; font-size: 1.2rem; background: #00ff41;
+            border: none; border-radius: 10px; cursor: pointer; z-index: 100;
+        `;
+        
+        playButton.onclick = async () => {
+            try {
+                this.remoteVideoElement.muted = true;
+                await this.remoteVideoElement.play();
+                playButton.remove();
+                
+                // Unmute after successful user-initiated playback
+                setTimeout(() => {
+                    this.remoteVideoElement.muted = false;
+                }, 1000);
+                
+            } catch (error) {
+                console.error('❌ User-initiated play failed:', error);
+            }
+        };
+        
+        this.elements.strangerVideo.style.position = 'relative';
+        this.elements.strangerVideo.appendChild(playButton);
+    }
+
     async startRealSearch() {
-        console.log(`🔍 Searching for ${this.state.selectedHobby.name} enthusiasts...`);
+        console.log(`🔍 Searching for ${this.state.selectedHobby.name} fans...`);
         
         if (this.elements.loadingText) {
             this.elements.loadingText.textContent = 
-                `🔍 Searching for ${this.state.selectedHobby.name} fans... 🌍✨`;
+                `🔍 Searching for ${this.state.selectedHobby.name} enthusiasts...`;
         }
 
         this.showView('loadingScreen');
@@ -482,24 +440,20 @@ class StrangerFaceApp {
     }
 
     async handleRealMatchFound(matchData) {
-        console.log('🎉 Real match found!', matchData);
+        console.log('🎉 Match found!', matchData);
         
         this.state.currentStranger = {
-            country: matchData.partner.country || 'Unknown',
-            flag: matchData.partner.flag || '🌍',
-            hobby: matchData.partner.hobby || this.state.selectedHobby.id,
+            country: matchData.partner?.country || 'Unknown',
+            flag: matchData.partner?.flag || '🌍',
+            hobby: matchData.partner?.hobby || this.state.selectedHobby?.id,
             roomId: matchData.roomId
         };
 
-        // Initialize peer connection
         await this.initializePeerConnection();
-
-        // Update UI
         this.updateConnectionInfo();
         this.showView('chatScreen');
         this.showConnectionCelebration();
         
-        // Create offer after delay
         setTimeout(() => this.createAndSendOffer(), 1000);
     }
 
@@ -532,9 +486,7 @@ class StrangerFaceApp {
 
             const pc = this.state.peerConnection;
             
-            // Handle signaling state
             if (pc.signalingState === 'have-local-offer') {
-                console.log('🔄 Rolling back local offer...');
                 await pc.setLocalDescription({ type: 'rollback' });
             }
             
@@ -544,8 +496,8 @@ class StrangerFaceApp {
                 const answer = await pc.createAnswer();
                 await pc.setLocalDescription(answer);
                 
-                console.log('📤 Sending answer');
                 this.socket.emit('answer', { answer });
+                console.log('📤 Answer sent');
             }
             
         } catch (error) {
@@ -555,8 +507,6 @@ class StrangerFaceApp {
 
     async handleAnswer(data) {
         try {
-            console.log('✅ Handling answer...');
-            
             const pc = this.state.peerConnection;
             if (!pc || pc.signalingState === 'stable') return;
             
@@ -575,14 +525,12 @@ class StrangerFaceApp {
             
             if (pc.remoteDescription) {
                 await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-                console.log('🧊 ICE candidate added');
             } else {
-                console.log('⏳ Queueing ICE candidate');
                 this.queuedIceCandidates.push(data.candidate);
             }
             
         } catch (error) {
-            console.error('❌ Failed to add ICE candidate:', error);
+            console.error('❌ ICE candidate failed:', error);
         }
     }
 
@@ -597,7 +545,7 @@ class StrangerFaceApp {
             try {
                 await pc.addIceCandidate(new RTCIceCandidate(candidate));
             } catch (error) {
-                console.error('❌ Failed to add queued ICE candidate:', error);
+                console.error('❌ Queued ICE candidate failed:', error);
             }
         }
     }
@@ -613,7 +561,7 @@ class StrangerFaceApp {
     }
 
     handleNextStranger() {
-        console.log('➡️ Finding next stranger...');
+        console.log('➡️ Next stranger...');
         this.closePeerConnection();
         this.stopSessionTimer();
         this.socket?.emit('next-stranger');
@@ -623,45 +571,12 @@ class StrangerFaceApp {
         const audioTracks = this.state.localStream?.getAudioTracks() || [];
         audioTracks.forEach(track => track.enabled = !track.enabled);
         this.state.isMuted = audioTracks.length ? !audioTracks[0].enabled : false;
-        
-        const muteBtn = this.elements.muteBtn;
-        if (muteBtn) {
-            const icon = muteBtn.querySelector('.btn-icon');
-            const text = muteBtn.querySelector('.btn-text');
-            if (icon) icon.textContent = this.state.isMuted ? '🔇' : '🔊';
-            if (text) text.textContent = this.state.isMuted ? 'Unmute' : 'Mute';
-        }
-        
         console.log(`🔊 Audio ${this.state.isMuted ? 'muted' : 'unmuted'}`);
     }
 
     handleReportUser() {
-        console.log('⚠️ User reported');
-        this.showNotification('User reported. Thank you!', 'success');
+        this.showNotification('User reported', 'success');
         setTimeout(() => this.handleNextStranger(), 1000);
-    }
-
-    sendEmojiReaction(emoji) {
-        console.log(`💫 Sending emoji: ${emoji}`);
-        this.createFloatingEmoji(emoji);
-    }
-
-    createFloatingEmoji(emoji) {
-        const container = document.getElementById('emojiReactions') || document.body;
-        const emojiElement = document.createElement('div');
-        emojiElement.textContent = emoji;
-        emojiElement.style.cssText = `
-            position: absolute;
-            font-size: 2rem;
-            pointer-events: none;
-            z-index: 1000;
-            animation: emoji-float 3s ease-out forwards;
-            left: ${Math.random() * window.innerWidth}px;
-            bottom: 20%;
-        `;
-        
-        container.appendChild(emojiElement);
-        setTimeout(() => container.removeChild(emojiElement), 3000);
     }
 
     handlePartnerDisconnected() {
@@ -678,17 +593,12 @@ class StrangerFaceApp {
             }
         } catch (e) {}
         
-        if (this.relayFallbackTimer) {
-            clearTimeout(this.relayFallbackTimer);
-            this.relayFallbackTimer = null;
-        }
-        
-        this.iceConnected = false;
+        this.iceConnectionReady = false;
         this.remoteVideoElement = null;
+        this.videoAttachmentAttempted = false;
         this.state.remoteStream = null;
         this.queuedIceCandidates = [];
         
-        // Reset video container
         if (this.elements.strangerVideo) {
             this.elements.strangerVideo.innerHTML = `
                 <div class="video-placeholder">
@@ -729,20 +639,20 @@ class StrangerFaceApp {
     showConnectionCelebration() {
         const hobbyName = this.state.selectedHobby?.name || 'your hobby';
         const country = this.state.currentStranger?.country || 'somewhere';
-        const message = `🎉 Connected with someone who loves ${hobbyName} from ${country}! Say hello! 👋`;
+        const message = `🎉 Connected with someone who loves ${hobbyName} from ${country}!`;
         
         const celebration = document.createElement('div');
         celebration.style.cssText = `
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0, 0, 0, 0.8); display: flex; align-items: center;
-            justify-content: center; z-index: 1500; animation: fadeIn 0.5s ease-out;
+            justify-content: center; z-index: 1500;
         `;
         
         celebration.innerHTML = `
             <div style="background: rgba(0, 0, 0, 0.9); border: 2px solid #00ffff; 
                  border-radius: 20px; padding: 3rem; text-align: center; max-width: 500px;">
                 <div style="font-size: 1.5rem; color: white; margin-bottom: 1rem;">${message}</div>
-                <div style="font-size: 2rem;">🎉✨🚀💫🌸</div>
+                <div style="font-size: 2rem;">🎉✨🚀💫</div>
             </div>
         `;
         
@@ -791,27 +701,11 @@ class StrangerFaceApp {
     }
 }
 
-// Add required CSS animations
-const style = document.createElement('style');
-style.textContent = `
-@keyframes fadeIn {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes emoji-float {
-    0% { transform: translateY(0) scale(0.8); opacity: 1; }
-    50% { transform: translateY(-200px) scale(1.2); opacity: 1; }
-    100% { transform: translateY(-400px) scale(0.6); opacity: 0; }
-}
-`;
-document.head.appendChild(style);
-
-// Initialize the application
-console.log('🚀 Starting Stranger Face with ICE-Synchronized Video...');
+// Initialize
+console.log('🚀 Starting Stranger Face with ICE-Sync + Autoplay Fix...');
 window.strangerFaceApp = new StrangerFaceApp();
 
-// Cleanup on page unload
+// Cleanup
 window.addEventListener('beforeunload', () => {
     if (window.strangerFaceApp) {
         try {
