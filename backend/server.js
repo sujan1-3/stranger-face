@@ -1,17 +1,10 @@
-// Stranger Face Backend Server - WITH WebRTC SIGNALING
+// Stranger Face Backend Server - Complete WebRTC Signaling and Matching
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
-const axios = require('axios');
-const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const compression = require('compression');
-
-// Import routes (create empty files if they don't exist)
-// const authRoutes = require('./routes/auth');
-// const chatRoutes = require('./routes/chat');
-// const reportRoutes = require('./routes/report');
 
 const app = express();
 const server = http.createServer(app);
@@ -85,7 +78,7 @@ const waitingUsers = new Map();
 const activeRooms = new Map();
 const userSockets = new Map();
 
-// Socket.io connection handling WITH WebRTC signaling
+// Socket.io connection handling WITH complete WebRTC signaling
 io.on('connection', (socket) => {
     console.log(`✅ User connected: ${socket.id}`);
     
@@ -96,7 +89,7 @@ io.on('connection', (socket) => {
     socket.userInfo = {
         id: socket.id,
         hobby: null,
-        country: 'Demo Country',
+        country: 'Unknown',
         countryCode: 'XX',
         flag: '🌍',
         connectedAt: new Date()
@@ -104,35 +97,47 @@ io.on('connection', (socket) => {
 
     // Handle hobby preference setting
     socket.on('set-hobby-preference', (hobbyPreference) => {
-        console.log(`🎯 User ${socket.id} set hobby: ${hobbyPreference}`);
+        console.log(`🎯 User ${socket.id} set hobby preference: ${hobbyPreference}`);
         socket.userInfo.hobby = hobbyPreference;
     });
 
-    // Handle match finding
+    // Handle match finding - COMPLETE IMPLEMENTATION
     socket.on('find-match', () => {
-        console.log(`🔍 Finding match for ${socket.id} with hobby: ${socket.userInfo.hobby}`);
-        
-        // Remove from waiting list if already there
-        waitingUsers.delete(socket.id);
-        
-        // Find compatible match
+        console.log(`[FIND-MATCH] Event received from user ${socket.id} with hobby: ${socket.userInfo.hobby}`);
+
+        if (!socket.userInfo.hobby) {
+            console.log(`[WARNING] User ${socket.id} has not set hobby yet`);
+            socket.emit('error', { message: 'Set hobby preference first!' });
+            return;
+        }
+
+        // Remove from waiting list if present
+        if (waitingUsers.has(socket.id)) {
+            waitingUsers.delete(socket.id);
+            console.log(`[INFO] Removed user ${socket.id} from waiting list for restart`);
+        }
+
+        console.log(`[CURRENT WAITING] ${waitingUsers.size} users waiting`);
+
+        // Try to find a match
         let matchFound = false;
-        
+
         for (const [waitingId, waitingSocket] of waitingUsers) {
+            console.log(`[CHECK] Checking waiting user ${waitingId} with hobby: ${waitingSocket.userInfo.hobby}`);
+
             if (waitingSocket.userInfo.hobby === socket.userInfo.hobby) {
-                // Match found!
-                console.log(`🎉 Match found: ${socket.id} <-> ${waitingId}`);
-                
-                // Remove from waiting
+                console.log(`[MATCH FOUND] ${socket.id} <-> ${waitingId}`);
+
+                // Remove matched user from waiting list
                 waitingUsers.delete(waitingId);
-                
+
                 // Create room
                 const roomId = `room_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-                
+
                 // Join both users to room
                 socket.join(roomId);
                 waitingSocket.join(roomId);
-                
+
                 // Store room info
                 activeRooms.set(roomId, {
                     user1: socket.id,
@@ -140,13 +145,15 @@ io.on('connection', (socket) => {
                     hobby: socket.userInfo.hobby,
                     startTime: new Date()
                 });
-                
+
                 // Set room info on sockets
                 socket.roomId = roomId;
                 socket.partnerId = waitingId;
                 waitingSocket.roomId = roomId;
                 waitingSocket.partnerId = socket.id;
-                
+
+                console.log(`[EMIT] Emitting match-found to ${socket.id} and ${waitingId}`);
+
                 // Notify both users
                 socket.emit('match-found', {
                     roomId: roomId,
@@ -157,7 +164,7 @@ io.on('connection', (socket) => {
                         hobby: waitingSocket.userInfo.hobby
                     }
                 });
-                
+
                 waitingSocket.emit('match-found', {
                     roomId: roomId,
                     partner: {
@@ -167,16 +174,16 @@ io.on('connection', (socket) => {
                         hobby: socket.userInfo.hobby
                     }
                 });
-                
+
                 matchFound = true;
                 break;
             }
         }
-        
+
         if (!matchFound) {
             // Add to waiting list
-            console.log(`⏳ Adding ${socket.id} to waiting list`);
             waitingUsers.set(socket.id, socket);
+            console.log(`[WAIT] Added user ${socket.id} to waiting list. Total waiting: ${waitingUsers.size}`);
             socket.emit('waiting-for-match');
         }
     });
