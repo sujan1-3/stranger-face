@@ -1,6 +1,6 @@
 /**
  * Stranger Face - REAL WebRTC Video Chat Application
- * Complete production-ready implementation with hobby matching
+ * Complete production-ready implementation with hobby matching and fixed signaling
  */
 
 class StrangerFaceApp {
@@ -46,6 +46,9 @@ class StrangerFaceApp {
 
         // DOM elements cache
         this.elements = {};
+
+        // Queued ICE candidates
+        this.queuedIceCandidates = [];
 
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', () => this.init());
@@ -304,23 +307,24 @@ class StrangerFaceApp {
         return video;
     }
 
-    // Initialize WebRTC peer connection
+    // Initialize WebRTC peer connection (UPDATED WITH FIXES)
     async initializePeerConnection() {
         try {
             console.log('🔗 Initializing peer connection...');
             
             this.state.peerConnection = new RTCPeerConnection(this.rtcConfig);
+            const pc = this.state.peerConnection;
             
             // Add local stream to peer connection
             if (this.state.localStream) {
                 this.state.localStream.getTracks().forEach(track => {
                     console.log('📤 Adding track:', track.kind);
-                    this.state.peerConnection.addTrack(track, this.state.localStream);
+                    pc.addTrack(track, this.state.localStream);
                 });
             }
 
             // Handle incoming remote stream
-            this.state.peerConnection.ontrack = (event) => {
+            pc.ontrack = (event) => {
                 console.log('📥 Received remote stream');
                 const [remoteStream] = event.streams;
                 this.state.remoteStream = remoteStream;
@@ -339,21 +343,26 @@ class StrangerFaceApp {
                     statusElement.textContent = '🟢 Connected';
                     statusElement.style.color = '#00ff41';
                 }
+                
+                // Process any queued ICE candidates
+                this.processQueuedIceCandidates();
             };
 
             // Handle ICE candidates
-            this.state.peerConnection.onicecandidate = (event) => {
+            pc.onicecandidate = (event) => {
                 if (event.candidate && this.socket && this.socket.connected) {
                     console.log('🧊 Sending ICE candidate');
                     this.socket.emit('ice-candidate', {
                         candidate: event.candidate
                     });
+                } else if (!event.candidate) {
+                    console.log('🧊 ICE gathering completed');
                 }
             };
 
             // Handle connection state changes
-            this.state.peerConnection.onconnectionstatechange = () => {
-                const state = this.state.peerConnection.connectionState;
+            pc.onconnectionstatechange = () => {
+                const state = pc.connectionState;
                 console.log('🔗 Connection state changed:', state);
                 
                 switch (state) {
@@ -374,9 +383,14 @@ class StrangerFaceApp {
                 }
             };
 
+            // Handle signaling state changes
+            pc.onsignalingstatechange = () => {
+                console.log('📡 Signaling state changed:', pc.signalingState);
+            };
+
             // Handle ICE connection state changes
-            this.state.peerConnection.oniceconnectionstatechange = () => {
-                console.log('🧊 ICE connection state:', this.state.peerConnection.iceConnectionState);
+            pc.oniceconnectionstatechange = () => {
+                console.log('🧊 ICE connection state:', pc.iceConnectionState);
             };
 
             console.log('✅ Peer connection initialized');
@@ -384,6 +398,24 @@ class StrangerFaceApp {
         } catch (error) {
             console.error('❌ Failed to initialize peer connection:', error);
             this.showNotification('Failed to initialize video connection', 'error');
+        }
+    }
+
+    // Process queued ICE candidates (NEW)
+    async processQueuedIceCandidates() {
+        if (this.queuedIceCandidates && this.queuedIceCandidates.length > 0) {
+            console.log(`🧊 Processing ${this.queuedIceCandidates.length} queued ICE candidates`);
+            
+            for (const candidate of this.queuedIceCandidates) {
+                try {
+                    await this.state.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                    console.log('🧊 Queued ICE candidate added');
+                } catch (error) {
+                    console.error('❌ Failed to add queued ICE candidate:', error);
+                }
+            }
+            
+            this.queuedIceCandidates = [];
         }
     }
 
@@ -530,7 +562,7 @@ class StrangerFaceApp {
         }
     }
 
-    // Handle incoming WebRTC offer
+    // Handle incoming WebRTC offer (UPDATED WITH FIXES)
     async handleOffer(data) {
         try {
             console.log('📞 Handling incoming offer...');
@@ -538,11 +570,23 @@ class StrangerFaceApp {
             if (!this.state.peerConnection) {
                 await this.initializePeerConnection();
             }
+
+            const pc = this.state.peerConnection;
             
-            await this.state.peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+            // Check signaling state before setting remote description
+            if (pc.signalingState === 'have-local-offer') {
+                console.log('🔄 Rolling back local offer...');
+                await pc.setLocalDescription({ type: 'rollback' });
+            }
             
-            const answer = await this.state.peerConnection.createAnswer();
-            await this.state.peerConnection.setLocalDescription(answer);
+            // Only set remote description if not in stable state with offer
+            if (pc.signalingState !== 'stable' || data.offer.type !== 'offer') {
+                await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+                console.log('✅ Remote offer set successfully');
+            }
+            
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
             
             console.log('📤 Sending answer to peer');
             this.socket.emit('answer', {
@@ -555,13 +599,29 @@ class StrangerFaceApp {
         }
     }
 
-    // Handle incoming WebRTC answer
+    // Handle incoming WebRTC answer (UPDATED WITH FIXES)
     async handleAnswer(data) {
         try {
             console.log('✅ Handling incoming answer...');
             
-            await this.state.peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-            console.log('✅ Answer set successfully');
+            const pc = this.state.peerConnection;
+            if (!pc) {
+                console.log('❌ No peer connection available');
+                return;
+            }
+            
+            // Check signaling state - only set remote description if expecting answer
+            if (pc.signalingState === 'stable') {
+                console.log('⚠️ Peer connection already stable, ignoring answer');
+                return;
+            }
+            
+            if (pc.signalingState === 'have-local-offer') {
+                await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+                console.log('✅ Remote answer set successfully');
+            } else {
+                console.log(`⚠️ Unexpected signaling state: ${pc.signalingState}`);
+            }
             
         } catch (error) {
             console.error('❌ Failed to handle answer:', error);
@@ -569,13 +629,25 @@ class StrangerFaceApp {
         }
     }
 
-    // Handle incoming ICE candidate
+    // Handle incoming ICE candidate (UPDATED WITH FIXES)
     async handleIceCandidate(data) {
         try {
-            if (this.state.peerConnection && data.candidate) {
-                await this.state.peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-                console.log('🧊 ICE candidate added successfully');
+            const pc = this.state.peerConnection;
+            if (!pc) {
+                console.log('❌ No peer connection for ICE candidate');
+                return;
             }
+            
+            // Check if remote description is set before adding ICE candidate
+            if (pc.remoteDescription) {
+                await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+                console.log('🧊 ICE candidate added successfully');
+            } else {
+                console.log('⏳ Queueing ICE candidate - no remote description yet');
+                // Queue ICE candidate for later
+                this.queuedIceCandidates.push(data.candidate);
+            }
+            
         } catch (error) {
             console.error('❌ Failed to add ICE candidate:', error);
         }
@@ -807,6 +879,9 @@ class StrangerFaceApp {
             this.state.remoteStream.getTracks().forEach(track => track.stop());
             this.state.remoteStream = null;
         }
+
+        // Clear queued ICE candidates
+        this.queuedIceCandidates = [];
 
         // Reset video containers
         if (this.elements.strangerVideo) {
