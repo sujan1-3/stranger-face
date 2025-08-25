@@ -1,6 +1,6 @@
 /**
  * Stranger Face - REAL WebRTC Video Chat Application
- * Complete production-ready implementation with FORCED video playback
+ * Final, production-ready code with TURN server configuration.
  */
 
 class StrangerFaceApp {
@@ -22,13 +22,16 @@ class StrangerFaceApp {
             socket: null
         };
 
-        // WebRTC configuration with STUN servers
+        // WebRTC configuration with STUN and your new TURN server
         this.rtcConfig = {
             iceServers: [
+                {
+                    urls: "turn:global.turn.xirsys.com:80",
+                    username: "qazxsw12345",
+                    credential: "faba1ca0-819c-11f0-942e-0242ac140002"
+                },
                 { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' },
-                { urls: 'stun:stun3.l.google.com:19302' }
+                { urls: 'stun:stun1.l.google.com:19302' }
             ]
         };
 
@@ -359,10 +362,6 @@ class StrangerFaceApp {
             this.state.peerConnection = new RTCPeerConnection(this.rtcConfig);
             const pc = this.state.peerConnection;
             
-            // =================================================================
-            // START: REVISED ontrack HANDLER
-            // =================================================================
-            
             // A simpler, more reliable ontrack handler
             pc.ontrack = (event) => {
                 console.log('📥 REMOTE STREAM RECEIVED!', event.streams[0]);
@@ -396,10 +395,6 @@ class StrangerFaceApp {
                     console.error('❌ CRITICAL: The strangerVideo container was not found in the HTML!');
                 }
             };
-
-            // =================================================================
-            // END: REVISED ontrack HANDLER
-            // =================================================================
 
             // Add local stream tracks to peer connection
             if (this.state.localStream) {
