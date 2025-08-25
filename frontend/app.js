@@ -1,6 +1,6 @@
 /**
  * Stranger Face - REAL WebRTC Video Chat Application
- * Complete production-ready implementation with FIXED WebRTC signaling
+ * Complete production-ready implementation with FIXED remote video streaming
  */
 
 class StrangerFaceApp {
@@ -314,21 +314,35 @@ class StrangerFaceApp {
         }
     }
 
-    // Create video element with proper styling
+    // Create video element with enhanced properties
     createVideoElement(isLocal = false) {
         const video = document.createElement('video');
         video.autoplay = true;
         video.playsInline = true;
         video.controls = false;
+        video.muted = isLocal; // Only mute local video to prevent echo
         video.style.width = '100%';
         video.style.height = '100%';
         video.style.objectFit = 'cover';
         video.style.borderRadius = isLocal ? '50%' : '15px';
         video.style.backgroundColor = '#000';
         
-        // Add event listeners for better UX
+        // Add enhanced event listeners
         video.addEventListener('loadedmetadata', () => {
-            console.log(`📹 Video ${isLocal ? 'local' : 'remote'} stream loaded`);
+            console.log(`📹 Video ${isLocal ? 'local' : 'remote'} metadata loaded`);
+            console.log(`📹 Video dimensions: ${video.videoWidth}x${video.videoHeight}`);
+        });
+        
+        video.addEventListener('loadeddata', () => {
+            console.log(`📹 Video ${isLocal ? 'local' : 'remote'} data loaded`);
+        });
+        
+        video.addEventListener('canplay', () => {
+            console.log(`📹 Video ${isLocal ? 'local' : 'remote'} can play`);
+        });
+        
+        video.addEventListener('playing', () => {
+            console.log(`📹 Video ${isLocal ? 'local' : 'remote'} is playing`);
         });
         
         video.addEventListener('error', (e) => {
@@ -338,7 +352,7 @@ class StrangerFaceApp {
         return video;
     }
 
-    // Initialize WebRTC peer connection
+    // Initialize WebRTC peer connection (ENHANCED FOR REMOTE STREAM FIX)
     async initializePeerConnection() {
         try {
             console.log('🔗 Initializing peer connection...');
@@ -346,27 +360,41 @@ class StrangerFaceApp {
             this.state.peerConnection = new RTCPeerConnection(this.rtcConfig);
             const pc = this.state.peerConnection;
             
-            // Add local stream to peer connection
-            if (this.state.localStream) {
-                this.state.localStream.getTracks().forEach(track => {
-                    console.log('📤 Adding track:', track.kind);
-                    pc.addTrack(track, this.state.localStream);
-                });
-            }
-
-            // Handle incoming remote stream
+            // CRITICAL: Set up ontrack handler FIRST before anything else
             pc.ontrack = (event) => {
-                console.log('📥 Received remote stream');
+                console.log('📥 REMOTE STREAM RECEIVED!');
+                console.log('📥 Number of streams:', event.streams.length);
+                console.log('📥 Track kind:', event.track.kind);
+                
                 const [remoteStream] = event.streams;
                 this.state.remoteStream = remoteStream;
                 
-                // Display remote video
+                // Log track details
+                remoteStream.getTracks().forEach(track => {
+                    console.log(`📥 Remote track: ${track.kind}, enabled: ${track.enabled}, readyState: ${track.readyState}`);
+                });
+                
+                // Create and display remote video element
                 const remoteVideoElement = this.createVideoElement(false);
                 remoteVideoElement.srcObject = remoteStream;
                 
+                // IMPORTANT: Ensure video plays
+                remoteVideoElement.onloadedmetadata = () => {
+                    console.log('🎥 Remote video metadata loaded, starting playback');
+                    remoteVideoElement.play().catch(e => {
+                        console.error('❌ Failed to play remote video:', e);
+                    });
+                };
+                
+                // Replace placeholder with actual video
                 const strangerVideoContainer = this.elements.strangerVideo;
-                strangerVideoContainer.innerHTML = '';
-                strangerVideoContainer.appendChild(remoteVideoElement);
+                if (strangerVideoContainer) {
+                    strangerVideoContainer.innerHTML = '';
+                    strangerVideoContainer.appendChild(remoteVideoElement);
+                    console.log('✅ Remote video element attached to container');
+                } else {
+                    console.error('❌ Stranger video container not found!');
+                }
                 
                 // Update connection status
                 const statusElement = document.querySelector('.connection-status');
@@ -377,7 +405,22 @@ class StrangerFaceApp {
                 
                 // Process any queued ICE candidates
                 this.processQueuedIceCandidates();
+                
+                // Show success notification
+                this.showNotification('Remote video connected!', 'success');
             };
+
+            // Add local stream tracks to peer connection AFTER setting up ontrack
+            if (this.state.localStream) {
+                console.log('📤 Adding local tracks to peer connection...');
+                this.state.localStream.getTracks().forEach(track => {
+                    console.log('📤 Adding track:', track.kind, track.enabled);
+                    const sender = pc.addTrack(track, this.state.localStream);
+                    console.log('📤 Track added, sender:', sender);
+                });
+            } else {
+                console.error('❌ No local stream available to add tracks!');
+            }
 
             // Handle ICE candidates
             pc.onicecandidate = (event) => {
@@ -401,6 +444,7 @@ class StrangerFaceApp {
                         this.showNotification('Connecting to peer...', 'info');
                         break;
                     case 'connected':
+                        console.log('🎉 WebRTC connection fully established!');
                         this.showNotification('Video chat connected!', 'success');
                         this.startSessionTimer();
                         break;
@@ -419,7 +463,12 @@ class StrangerFaceApp {
                 console.log('📡 Signaling state changed:', pc.signalingState);
             };
 
-            console.log('✅ Peer connection initialized');
+            // Handle ICE connection state changes
+            pc.oniceconnectionstatechange = () => {
+                console.log('🧊 ICE connection state:', pc.iceConnectionState);
+            };
+
+            console.log('✅ Peer connection initialized with enhanced remote stream handling');
             
         } catch (error) {
             console.error('❌ Failed to initialize peer connection:', error);
