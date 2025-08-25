@@ -1,3 +1,26 @@
+/* Fix: Force main interface to be visible */
+.landing-container {
+    display: flex !important;
+    opacity: 1 !important;
+    z-index: 1000 !important;
+    position: relative !important;
+    min-height: 100vh !important;
+    justify-content: center !important;
+    align-items: center !important;
+}
+
+.hero-section {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    z-index: 1001 !important;
+}
+
+.main-title {
+    display: block !important;
+    opacity: 1 !important;
+}
+
 /* Cyberpunk Anime Stranger Face Styles */
 :root {
     /* Cyberpunk Color Palette */
