@@ -1,6 +1,6 @@
 /**
  * Stranger Face - REAL WebRTC Video Chat Application
- * Complete production-ready implementation with hobby matching and fixed signaling
+ * Complete production-ready implementation with FIXED WebRTC signaling
  */
 
 class StrangerFaceApp {
@@ -144,6 +144,37 @@ class StrangerFaceApp {
         } catch (error) {
             console.error('❌ Socket connection failed:', error);
             this.showNotification('Failed to connect to server', 'error');
+        }
+    }
+
+    // Safe WebRTC setRemoteDescription helper
+    async safeSetRemoteDescription(pc, description) {
+        const desc = new RTCSessionDescription(description);
+        
+        if (desc.type === 'answer') {
+            if (pc.signalingState === 'stable') {
+                console.log('⚠️ Ignoring answer - connection already stable');
+                return;
+            }
+            if (pc.signalingState === 'have-local-offer') {
+                await pc.setRemoteDescription(desc);
+                console.log('✅ Remote answer set successfully');
+            } else {
+                console.log('⚠️ Unexpected state for answer:', pc.signalingState);
+            }
+        } else if (desc.type === 'offer') {
+            if (pc.signalingState === 'stable') {
+                await pc.setRemoteDescription(desc);
+                console.log('✅ Remote offer set successfully');
+            } else if (pc.signalingState === 'have-local-offer') {
+                console.log('🔄 Rolling back local offer...');
+                await pc.setLocalDescription({ type: 'rollback' });
+                await pc.setRemoteDescription(desc);
+                console.log('✅ Remote offer set after rollback');
+            } else {
+                await pc.setRemoteDescription(desc);
+                console.log('✅ Remote offer set');
+            }
         }
     }
 
@@ -307,7 +338,7 @@ class StrangerFaceApp {
         return video;
     }
 
-    // Initialize WebRTC peer connection (UPDATED WITH FIXES)
+    // Initialize WebRTC peer connection
     async initializePeerConnection() {
         try {
             console.log('🔗 Initializing peer connection...');
@@ -388,11 +419,6 @@ class StrangerFaceApp {
                 console.log('📡 Signaling state changed:', pc.signalingState);
             };
 
-            // Handle ICE connection state changes
-            pc.oniceconnectionstatechange = () => {
-                console.log('🧊 ICE connection state:', pc.iceConnectionState);
-            };
-
             console.log('✅ Peer connection initialized');
             
         } catch (error) {
@@ -401,7 +427,7 @@ class StrangerFaceApp {
         }
     }
 
-    // Process queued ICE candidates (NEW)
+    // Process queued ICE candidates
     async processQueuedIceCandidates() {
         if (this.queuedIceCandidates && this.queuedIceCandidates.length > 0) {
             console.log(`🧊 Processing ${this.queuedIceCandidates.length} queued ICE candidates`);
@@ -562,10 +588,11 @@ class StrangerFaceApp {
         }
     }
 
-    // Handle incoming WebRTC offer (UPDATED WITH FIXES)
+    // Handle incoming WebRTC offer (COMPLETELY FIXED)
     async handleOffer(data) {
         try {
             console.log('📞 Handling incoming offer...');
+            console.log('📡 Current signaling state:', this.state.peerConnection?.signalingState || 'no connection');
             
             if (!this.state.peerConnection) {
                 await this.initializePeerConnection();
@@ -573,25 +600,28 @@ class StrangerFaceApp {
 
             const pc = this.state.peerConnection;
             
-            // Check signaling state before setting remote description
-            if (pc.signalingState === 'have-local-offer') {
-                console.log('🔄 Rolling back local offer...');
-                await pc.setLocalDescription({ type: 'rollback' });
+            // CRITICAL: Check and handle signaling state properly
+            console.log('📡 Signaling state before handling offer:', pc.signalingState);
+            
+            // Safe set remote description
+            await this.safeSetRemoteDescription(pc, data.offer);
+            
+            // CRITICAL: Only create answer if we're in the right state
+            console.log('📡 Signaling state before createAnswer:', pc.signalingState);
+            
+            if (pc.signalingState === 'have-remote-offer') {
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                
+                console.log('📤 Sending answer to peer');
+                this.socket.emit('answer', {
+                    answer: answer
+                });
+                
+                console.log('✅ Answer created and sent successfully');
+            } else {
+                console.log('❌ Cannot create answer - signaling state is:', pc.signalingState);
             }
-            
-            // Only set remote description if not in stable state with offer
-            if (pc.signalingState !== 'stable' || data.offer.type !== 'offer') {
-                await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-                console.log('✅ Remote offer set successfully');
-            }
-            
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            
-            console.log('📤 Sending answer to peer');
-            this.socket.emit('answer', {
-                answer: answer
-            });
             
         } catch (error) {
             console.error('❌ Failed to handle offer:', error);
@@ -599,10 +629,11 @@ class StrangerFaceApp {
         }
     }
 
-    // Handle incoming WebRTC answer (UPDATED WITH FIXES)
+    // Handle incoming WebRTC answer (COMPLETELY FIXED)
     async handleAnswer(data) {
         try {
             console.log('✅ Handling incoming answer...');
+            console.log('📡 Current signaling state:', this.state.peerConnection?.signalingState);
             
             const pc = this.state.peerConnection;
             if (!pc) {
@@ -610,26 +641,15 @@ class StrangerFaceApp {
                 return;
             }
             
-            // Check signaling state - only set remote description if expecting answer
-            if (pc.signalingState === 'stable') {
-                console.log('⚠️ Peer connection already stable, ignoring answer');
-                return;
-            }
-            
-            if (pc.signalingState === 'have-local-offer') {
-                await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-                console.log('✅ Remote answer set successfully');
-            } else {
-                console.log(`⚠️ Unexpected signaling state: ${pc.signalingState}`);
-            }
+            // Safe set remote description
+            await this.safeSetRemoteDescription(pc, data.answer);
             
         } catch (error) {
             console.error('❌ Failed to handle answer:', error);
-            this.showNotification('Failed to complete connection', 'error');
         }
     }
 
-    // Handle incoming ICE candidate (UPDATED WITH FIXES)
+    // Handle incoming ICE candidate (FIXED)
     async handleIceCandidate(data) {
         try {
             const pc = this.state.peerConnection;
