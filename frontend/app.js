@@ -1,6 +1,6 @@
 /**
  * Stranger Face - REAL WebRTC Video Chat Application
- * Complete production-ready implementation
+ * Complete production-ready implementation with hobby matching
  */
 
 class StrangerFaceApp {
@@ -22,12 +22,13 @@ class StrangerFaceApp {
             socket: null
         };
 
-        // WebRTC configuration
+        // WebRTC configuration with STUN servers
         this.rtcConfig = {
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' }
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' }
             ]
         };
 
@@ -74,19 +75,30 @@ class StrangerFaceApp {
     // Initialize real Socket.IO connection
     async initializeSocket() {
         try {
+            console.log('🔌 Connecting to backend server...');
+            
             // Connect to your Render backend
             this.socket = io('https://stranger-face-backend.onrender.com', {
-                transports: ['websocket', 'polling']
+                transports: ['websocket', 'polling'],
+                timeout: 20000,
+                reconnection: true,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 1000
             });
 
             this.socket.on('connect', () => {
-                console.log('🔌 Connected to real backend server!');
+                console.log('✅ Connected to real backend server!');
                 this.showNotification('Connected to server', 'success');
             });
 
-            this.socket.on('disconnect', () => {
-                console.log('❌ Disconnected from server');
+            this.socket.on('disconnect', (reason) => {
+                console.log('❌ Disconnected from server:', reason);
                 this.showNotification('Disconnected from server', 'error');
+            });
+
+            this.socket.on('connect_error', (error) => {
+                console.error('❌ Connection error:', error);
+                this.showNotification('Failed to connect to server', 'error');
             });
 
             // Real match found from backend
@@ -121,6 +133,11 @@ class StrangerFaceApp {
                 this.updateSearchStatus('Searching for someone awesome...');
             });
 
+            this.socket.on('error', (error) => {
+                console.error('❌ Socket error:', error);
+                this.showNotification(error.message || 'An error occurred', 'error');
+            });
+
         } catch (error) {
             console.error('❌ Socket connection failed:', error);
             this.showNotification('Failed to connect to server', 'error');
@@ -144,6 +161,8 @@ class StrangerFaceApp {
         this.elements.reportBtn = document.getElementById('reportBtn');
         this.elements.selfVideo = document.getElementById('selfVideo');
         this.elements.strangerVideo = document.getElementById('strangerVideo');
+        this.elements.sessionTime = document.getElementById('sessionTime');
+        this.elements.emojiButtons = document.querySelectorAll('.emoji-btn');
     }
 
     // Set up all event listeners
@@ -180,6 +199,32 @@ class StrangerFaceApp {
                 this.handleReportUser();
             });
         }
+
+        // Emoji reactions
+        this.elements.emojiButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const emoji = btn.dataset.emoji;
+                this.sendEmojiReaction(emoji);
+            });
+        });
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (this.state.currentView === 'chatScreen') {
+                switch(e.key) {
+                    case ' ': // Space = Next stranger
+                        e.preventDefault();
+                        this.handleNextStranger();
+                        break;
+                    case 'm': // M = Mute toggle
+                        this.handleMuteToggle();
+                        break;
+                    case 'Escape': // Esc = Back to landing
+                        this.handleBackToLanding();
+                        break;
+                }
+            }
+        });
     }
 
     // Request real camera and microphone access
@@ -189,21 +234,23 @@ class StrangerFaceApp {
             
             const constraints = {
                 video: {
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 },
-                    facingMode: 'user'
+                    width: { ideal: 1280, max: 1920 },
+                    height: { ideal: 720, max: 1080 },
+                    facingMode: 'user',
+                    frameRate: { ideal: 30 }
                 },
                 audio: {
                     echoCancellation: true,
                     noiseSuppression: true,
-                    autoGainControl: true
+                    autoGainControl: true,
+                    sampleRate: 48000
                 }
             };
 
             this.state.localStream = await navigator.mediaDevices.getUserMedia(constraints);
             
             // Show local video in self video element
-            const selfVideoElement = this.createVideoElement();
+            const selfVideoElement = this.createVideoElement(true);
             selfVideoElement.srcObject = this.state.localStream;
             selfVideoElement.muted = true; // Prevent echo
             
@@ -213,6 +260,7 @@ class StrangerFaceApp {
             selfVideoContainer.appendChild(selfVideoElement);
             
             console.log('✅ Camera and microphone access granted!');
+            this.showNotification('Camera and microphone ready!', 'success');
             return true;
             
         } catch (error) {
@@ -220,9 +268,11 @@ class StrangerFaceApp {
             
             let errorMessage = 'Camera and microphone access is required for video chat.';
             if (error.name === 'NotAllowedError') {
-                errorMessage = 'Permission denied. Please enable camera and microphone access.';
+                errorMessage = 'Permission denied. Please enable camera and microphone access and refresh the page.';
             } else if (error.name === 'NotFoundError') {
                 errorMessage = 'No camera or microphone found. Please check your devices.';
+            } else if (error.name === 'NotReadableError') {
+                errorMessage = 'Camera or microphone is already in use by another application.';
             }
             
             this.showNotification(errorMessage, 'error');
@@ -231,47 +281,69 @@ class StrangerFaceApp {
     }
 
     // Create video element with proper styling
-    createVideoElement() {
+    createVideoElement(isLocal = false) {
         const video = document.createElement('video');
         video.autoplay = true;
         video.playsInline = true;
+        video.controls = false;
         video.style.width = '100%';
         video.style.height = '100%';
         video.style.objectFit = 'cover';
-        video.style.borderRadius = '15px';
+        video.style.borderRadius = isLocal ? '50%' : '15px';
+        video.style.backgroundColor = '#000';
+        
+        // Add event listeners for better UX
+        video.addEventListener('loadedmetadata', () => {
+            console.log(`📹 Video ${isLocal ? 'local' : 'remote'} stream loaded`);
+        });
+        
+        video.addEventListener('error', (e) => {
+            console.error(`❌ Video ${isLocal ? 'local' : 'remote'} error:`, e);
+        });
+        
         return video;
     }
 
     // Initialize WebRTC peer connection
     async initializePeerConnection() {
         try {
+            console.log('🔗 Initializing peer connection...');
+            
             this.state.peerConnection = new RTCPeerConnection(this.rtcConfig);
             
             // Add local stream to peer connection
             if (this.state.localStream) {
                 this.state.localStream.getTracks().forEach(track => {
+                    console.log('📤 Adding track:', track.kind);
                     this.state.peerConnection.addTrack(track, this.state.localStream);
                 });
             }
 
-            // Handle incoming stream
+            // Handle incoming remote stream
             this.state.peerConnection.ontrack = (event) => {
-                console.log('🎬 Received remote stream');
+                console.log('📥 Received remote stream');
                 const [remoteStream] = event.streams;
                 this.state.remoteStream = remoteStream;
                 
                 // Display remote video
-                const remoteVideoElement = this.createVideoElement();
+                const remoteVideoElement = this.createVideoElement(false);
                 remoteVideoElement.srcObject = remoteStream;
                 
                 const strangerVideoContainer = this.elements.strangerVideo;
                 strangerVideoContainer.innerHTML = '';
                 strangerVideoContainer.appendChild(remoteVideoElement);
+                
+                // Update connection status
+                const statusElement = document.querySelector('.connection-status');
+                if (statusElement) {
+                    statusElement.textContent = '🟢 Connected';
+                    statusElement.style.color = '#00ff41';
+                }
             };
 
             // Handle ICE candidates
             this.state.peerConnection.onicecandidate = (event) => {
-                if (event.candidate && this.socket) {
+                if (event.candidate && this.socket && this.socket.connected) {
                     console.log('🧊 Sending ICE candidate');
                     this.socket.emit('ice-candidate', {
                         candidate: event.candidate
@@ -281,16 +353,33 @@ class StrangerFaceApp {
 
             // Handle connection state changes
             this.state.peerConnection.onconnectionstatechange = () => {
-                console.log('🔗 Connection state:', this.state.peerConnection.connectionState);
+                const state = this.state.peerConnection.connectionState;
+                console.log('🔗 Connection state changed:', state);
                 
-                if (this.state.peerConnection.connectionState === 'connected') {
-                    this.showNotification('Video chat connected!', 'success');
-                } else if (this.state.peerConnection.connectionState === 'disconnected') {
-                    this.showNotification('Partner disconnected', 'info');
+                switch (state) {
+                    case 'connecting':
+                        this.showNotification('Connecting to peer...', 'info');
+                        break;
+                    case 'connected':
+                        this.showNotification('Video chat connected!', 'success');
+                        this.startSessionTimer();
+                        break;
+                    case 'disconnected':
+                        this.showNotification('Peer disconnected', 'info');
+                        break;
+                    case 'failed':
+                        this.showNotification('Connection failed', 'error');
+                        this.handleConnectionFailed();
+                        break;
                 }
             };
 
-            console.log('🔗 Peer connection initialized');
+            // Handle ICE connection state changes
+            this.state.peerConnection.oniceconnectionstatechange = () => {
+                console.log('🧊 ICE connection state:', this.state.peerConnection.iceConnectionState);
+            };
+
+            console.log('✅ Peer connection initialized');
             
         } catch (error) {
             console.error('❌ Failed to initialize peer connection:', error);
@@ -339,10 +428,19 @@ class StrangerFaceApp {
         
         this.state.selectedHobby = hobby;
 
+        // Show animation feedback
+        card.style.transform = 'scale(1.1)';
+        setTimeout(() => {
+            card.style.transform = '';
+        }, 300);
+
         // Request camera access before starting search
         const mediaGranted = await this.requestMediaAccess();
         if (!mediaGranted) {
-            return; // Don't proceed if camera access denied
+            // Reset selection if camera access denied
+            card.classList.remove('selected');
+            this.state.selectedHobby = null;
+            return;
         }
 
         // Start real search
@@ -366,11 +464,15 @@ class StrangerFaceApp {
 
         // Send hobby preference to backend
         if (this.socket && this.socket.connected) {
+            console.log('📤 Sending hobby preference to backend');
             this.socket.emit('set-hobby-preference', this.state.selectedHobby.id);
             this.socket.emit('find-match');
         } else {
             console.error('❌ Socket not connected');
-            this.showNotification('Connection to server lost', 'error');
+            this.showNotification('Connection to server lost. Please refresh and try again.', 'error');
+            setTimeout(() => {
+                this.showView('hobbySelection');
+            }, 3000);
         }
     }
 
@@ -379,10 +481,10 @@ class StrangerFaceApp {
         console.log('🎉 REAL match found!', matchData);
         
         this.state.currentStranger = {
-            country: matchData.partner.country,
-            countryCode: matchData.partner.countryCode,
-            flag: matchData.partner.flag,
-            hobby: matchData.partner.hobby,
+            country: matchData.partner.country || 'Unknown',
+            countryCode: matchData.partner.countryCode || 'XX',
+            flag: matchData.partner.flag || '🌍',
+            hobby: matchData.partner.hobby || this.state.selectedHobby.id,
             roomId: matchData.roomId
         };
 
@@ -399,16 +501,24 @@ class StrangerFaceApp {
         this.showConnectionCelebration();
         
         // Create and send offer (caller)
-        await this.createAndSendOffer();
+        setTimeout(() => {
+            this.createAndSendOffer();
+        }, 1000);
     }
 
     // Create and send WebRTC offer
     async createAndSendOffer() {
         try {
-            const offer = await this.state.peerConnection.createOffer();
+            console.log('📞 Creating and sending offer...');
+            
+            const offer = await this.state.peerConnection.createOffer({
+                offerToReceiveAudio: true,
+                offerToReceiveVideo: true
+            });
+            
             await this.state.peerConnection.setLocalDescription(offer);
             
-            console.log('📞 Sending offer to peer');
+            console.log('📤 Sending offer to peer');
             this.socket.emit('offer', {
                 offer: offer,
                 roomId: this.state.currentStranger.roomId
@@ -416,48 +526,56 @@ class StrangerFaceApp {
             
         } catch (error) {
             console.error('❌ Failed to create offer:', error);
+            this.showNotification('Failed to establish connection', 'error');
         }
     }
 
     // Handle incoming WebRTC offer
     async handleOffer(data) {
         try {
+            console.log('📞 Handling incoming offer...');
+            
             if (!this.state.peerConnection) {
                 await this.initializePeerConnection();
             }
             
-            await this.state.peerConnection.setRemoteDescription(data.offer);
+            await this.state.peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
             
             const answer = await this.state.peerConnection.createAnswer();
             await this.state.peerConnection.setLocalDescription(answer);
             
-            console.log('📞 Sending answer to peer');
+            console.log('📤 Sending answer to peer');
             this.socket.emit('answer', {
                 answer: answer
             });
             
         } catch (error) {
             console.error('❌ Failed to handle offer:', error);
+            this.showNotification('Failed to respond to connection', 'error');
         }
     }
 
     // Handle incoming WebRTC answer
     async handleAnswer(data) {
         try {
-            await this.state.peerConnection.setRemoteDescription(data.answer);
+            console.log('✅ Handling incoming answer...');
+            
+            await this.state.peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
             console.log('✅ Answer set successfully');
             
         } catch (error) {
             console.error('❌ Failed to handle answer:', error);
+            this.showNotification('Failed to complete connection', 'error');
         }
     }
 
     // Handle incoming ICE candidate
     async handleIceCandidate(data) {
         try {
-            await this.state.peerConnection.addIceCandidate(data.candidate);
-            console.log('🧊 ICE candidate added');
-            
+            if (this.state.peerConnection && data.candidate) {
+                await this.state.peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+                console.log('🧊 ICE candidate added successfully');
+            }
         } catch (error) {
             console.error('❌ Failed to add ICE candidate:', error);
         }
@@ -465,7 +583,7 @@ class StrangerFaceApp {
 
     // Update connection info display
     updateConnectionInfo() {
-        if (this.elements.hobbyName) {
+        if (this.elements.hobbyName && this.state.selectedHobby) {
             this.elements.hobbyName.textContent = this.state.selectedHobby.name;
         }
         
@@ -482,39 +600,56 @@ class StrangerFaceApp {
         // Close current connection
         this.closePeerConnection();
         
+        // Stop session timer
+        this.stopSessionTimer();
+        
         // Request new match
         if (this.socket && this.socket.connected) {
             this.socket.emit('next-stranger');
             this.startRealSearch();
+        } else {
+            this.showNotification('Connection lost. Please refresh and try again.', 'error');
         }
     }
 
     // Handle mute toggle
     handleMuteToggle() {
-        if (this.state.localStream) {
-            const audioTracks = this.state.localStream.getAudioTracks();
-            const isMuted = !audioTracks[0]?.enabled;
-            
-            audioTracks.forEach(track => {
-                track.enabled = isMuted;
-            });
-            
-            this.state.isMuted = !isMuted;
-            
-            const muteBtn = this.elements.muteBtn;
-            const icon = muteBtn.querySelector('.btn-icon');
-            const text = muteBtn.querySelector('.btn-text');
-            
-            if (this.state.isMuted) {
-                icon.textContent = '🔇';
-                text.textContent = 'Unmute';
-            } else {
-                icon.textContent = '🔊';
-                text.textContent = 'Mute';
-            }
-            
-            console.log(`🔊 Audio ${this.state.isMuted ? 'muted' : 'unmuted'}`);
+        if (!this.state.localStream) {
+            this.showNotification('No audio stream available', 'error');
+            return;
         }
+
+        const audioTracks = this.state.localStream.getAudioTracks();
+        if (audioTracks.length === 0) {
+            this.showNotification('No audio track available', 'error');
+            return;
+        }
+
+        // Toggle all audio tracks
+        audioTracks.forEach(track => {
+            track.enabled = !track.enabled;
+        });
+        
+        this.state.isMuted = !audioTracks[0].enabled;
+        
+        // Update UI
+        const muteBtn = this.elements.muteBtn;
+        const icon = muteBtn.querySelector('.btn-icon');
+        const text = muteBtn.querySelector('.btn-text');
+        
+        if (this.state.isMuted) {
+            icon.textContent = '🔇';
+            text.textContent = 'Unmute';
+            muteBtn.style.background = 'rgba(255, 68, 68, 0.2)';
+            this.showNotification('Microphone muted', 'info');
+        } else {
+            icon.textContent = '🔊';
+            text.textContent = 'Mute';
+            muteBtn.style.background = '';
+            this.showNotification('Microphone unmuted', 'info');
+        }
+        
+        console.log(`🔊 Audio ${this.state.isMuted ? 'muted' : 'unmuted'}`);
     }
 
     // Handle report user
@@ -524,11 +659,18 @@ class StrangerFaceApp {
         if (this.socket && this.state.currentStranger) {
             this.socket.emit('report-user', {
                 reportedUser: this.state.currentStranger.roomId,
-                reason: 'inappropriate_behavior'
+                reason: 'inappropriate_behavior',
+                timestamp: new Date().toISOString()
             });
             
             this.showNotification('User reported. Thank you for keeping our community safe.', 'success');
-            this.handleNextStranger();
+            
+            // Automatically find next stranger after reporting
+            setTimeout(() => {
+                this.handleNextStranger();
+            }, 2000);
+        } else {
+            this.showNotification('Unable to report user. No active connection.', 'error');
         }
     }
 
@@ -536,12 +678,127 @@ class StrangerFaceApp {
     handlePartnerDisconnected() {
         this.showNotification('Partner disconnected. Finding new match...', 'info');
         this.closePeerConnection();
-        this.startRealSearch();
+        this.stopSessionTimer();
+        
+        // Automatically start new search
+        setTimeout(() => {
+            this.startRealSearch();
+        }, 1000);
+    }
+
+    // Handle connection failed
+    handleConnectionFailed() {
+        this.showNotification('Connection failed. Trying to reconnect...', 'error');
+        this.closePeerConnection();
+        
+        // Try again after a short delay
+        setTimeout(() => {
+            this.startRealSearch();
+        }, 3000);
+    }
+
+    // Handle back to landing
+    handleBackToLanding() {
+        this.closePeerConnection();
+        this.stopSessionTimer();
+        
+        if (this.state.localStream) {
+            this.state.localStream.getTracks().forEach(track => track.stop());
+            this.state.localStream = null;
+        }
+        
+        this.state.selectedHobby = null;
+        this.state.currentStranger = null;
+        
+        // Reset hobby selection
+        this.elements.hobbyCards.forEach(c => c.classList.remove('selected'));
+        
+        this.showView('landing');
+    }
+
+    // Session timer functions
+    startSessionTimer() {
+        this.state.sessionStartTime = Date.now();
+        this.sessionTimer = setInterval(() => {
+            this.updateSessionTimer();
+        }, 1000);
+    }
+
+    updateSessionTimer() {
+        if (!this.state.sessionStartTime) return;
+        
+        const elapsed = Date.now() - this.state.sessionStartTime;
+        const minutes = Math.floor(elapsed / 60000);
+        const seconds = Math.floor((elapsed % 60000) / 1000);
+        
+        const timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        
+        if (this.elements.sessionTime) {
+            this.elements.sessionTime.textContent = timeString;
+        }
+    }
+
+    stopSessionTimer() {
+        if (this.sessionTimer) {
+            clearInterval(this.sessionTimer);
+            this.sessionTimer = null;
+        }
+        this.state.sessionStartTime = null;
+        
+        if (this.elements.sessionTime) {
+            this.elements.sessionTime.textContent = '00:00';
+        }
+    }
+
+    // Send emoji reaction
+    sendEmojiReaction(emoji) {
+        console.log(`💫 Sending emoji reaction: ${emoji}`);
+        
+        // Create floating emoji
+        this.createFloatingEmoji(emoji);
+        
+        // Send to other user via socket
+        if (this.socket && this.state.currentStranger) {
+            this.socket.emit('emoji-reaction', { 
+                emoji, 
+                roomId: this.state.currentStranger.roomId,
+                timestamp: Date.now() 
+            });
+        }
+    }
+
+    // Create floating emoji animation
+    createFloatingEmoji(emoji) {
+        const container = document.getElementById('emojiReactions');
+        if (!container) return;
+
+        const emojiElement = document.createElement('div');
+        emojiElement.className = 'floating-emoji';
+        emojiElement.textContent = emoji;
+        emojiElement.style.cssText = `
+            position: absolute;
+            font-size: 2rem;
+            pointer-events: none;
+            z-index: 1000;
+            animation: emoji-float 3s ease-out forwards;
+            left: ${Math.random() * window.innerWidth}px;
+            bottom: 10%;
+        `;
+        
+        container.appendChild(emojiElement);
+        
+        // Remove after animation
+        setTimeout(() => {
+            if (container.contains(emojiElement)) {
+                container.removeChild(emojiElement);
+            }
+        }, 3000);
     }
 
     // Close peer connection
     closePeerConnection() {
         if (this.state.peerConnection) {
+            console.log('🔒 Closing peer connection');
             this.state.peerConnection.close();
             this.state.peerConnection = null;
         }
@@ -550,11 +807,30 @@ class StrangerFaceApp {
             this.state.remoteStream.getTracks().forEach(track => track.stop());
             this.state.remoteStream = null;
         }
+
+        // Reset video containers
+        if (this.elements.strangerVideo) {
+            this.elements.strangerVideo.innerHTML = `
+                <div class="video-placeholder">
+                    <div class="placeholder-icon">🎥</div>
+                    <div class="placeholder-text">Connecting to stranger...</div>
+                </div>
+            `;
+        }
+
+        // Reset connection status
+        const statusElement = document.querySelector('.connection-status');
+        if (statusElement) {
+            statusElement.textContent = '🟡 Connecting...';
+            statusElement.style.color = '#ffff00';
+        }
     }
 
     // Show connection celebration
     showConnectionCelebration() {
-        const message = `🎉 Connected with someone who loves ${this.state.selectedHobby.name} from ${this.state.currentStranger.country}! 🌍✨`;
+        const hobbyName = this.state.selectedHobby?.name || 'your hobby';
+        const country = this.state.currentStranger?.country || 'somewhere';
+        const message = `🎉 Connected with someone who loves ${hobbyName} from ${country}! Say hello! 👋`;
         
         const celebration = document.createElement('div');
         celebration.style.cssText = `
@@ -565,16 +841,28 @@ class StrangerFaceApp {
         
         celebration.innerHTML = `
             <div style="background: rgba(0, 0, 0, 0.9); border: 2px solid #00ffff; 
-                 border-radius: 20px; padding: 3rem; text-align: center; max-width: 500px;">
-                <div style="font-size: 1.5rem; color: white; margin-bottom: 1rem;">${message}</div>
-                <div style="font-size: 2rem;">🎉✨🚀💫</div>
+                 border-radius: 20px; padding: 3rem; text-align: center; max-width: 500px;
+                 backdrop-filter: blur(20px);">
+                <div style="font-size: 1.5rem; color: white; margin-bottom: 1rem; line-height: 1.4;">
+                    ${message}
+                </div>
+                <div style="font-size: 2rem; animation: bounce-emoji 1s ease-in-out infinite;">
+                    🎉✨🚀💫🌸
+                </div>
             </div>
         `;
         
         document.body.appendChild(celebration);
         
         setTimeout(() => {
-            document.body.removeChild(celebration);
+            if (document.body.contains(celebration)) {
+                celebration.style.animation = 'fadeOut 0.5s ease-out';
+                setTimeout(() => {
+                    if (document.body.contains(celebration)) {
+                        document.body.removeChild(celebration);
+                    }
+                }, 500);
+            }
         }, 3000);
     }
 
@@ -600,6 +888,7 @@ class StrangerFaceApp {
             border-radius: 10px; border: 1px solid ${colors[type]};
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
             animation: slideIn 0.3s ease-out; max-width: 300px; font-size: 0.9rem;
+            backdrop-filter: blur(10px);
         `;
         
         notification.textContent = message;
@@ -607,18 +896,29 @@ class StrangerFaceApp {
         
         setTimeout(() => {
             if (document.body.contains(notification)) {
-                document.body.removeChild(notification);
+                notification.style.animation = 'slideOut 0.3s ease-out';
+                setTimeout(() => {
+                    if (document.body.contains(notification)) {
+                        document.body.removeChild(notification);
+                    }
+                }, 300);
             }
         }, 5000);
     }
 
     // Cleanup on page unload
     cleanup() {
+        console.log('🧹 Cleaning up resources...');
+        
         if (this.state.localStream) {
-            this.state.localStream.getTracks().forEach(track => track.stop());
+            this.state.localStream.getTracks().forEach(track => {
+                track.stop();
+                console.log('🛑 Stopped track:', track.kind);
+            });
         }
         
         this.closePeerConnection();
+        this.stopSessionTimer();
         
         if (this.socket) {
             this.socket.disconnect();
@@ -626,7 +926,7 @@ class StrangerFaceApp {
     }
 }
 
-// Add CSS animations
+// Add required CSS animations
 const style = document.createElement('style');
 style.textContent = `
 @keyframes fadeIn {
@@ -634,19 +934,82 @@ style.textContent = `
     to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes fadeOut {
+    from { opacity: 1; transform: translateY(0); }
+    to { opacity: 0; transform: translateY(-20px); }
+}
+
 @keyframes slideIn {
     from { transform: translateX(100%); opacity: 0; }
     to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes slideOut {
+    from { transform: translateX(0); opacity: 1; }
+    to { transform: translateX(100%); opacity: 0; }
+}
+
+@keyframes emoji-float {
+    0% {
+        transform: translateY(0) scale(0.8);
+        opacity: 1;
+    }
+    50% {
+        transform: translateY(-200px) scale(1.2);
+        opacity: 1;
+    }
+    100% {
+        transform: translateY(-400px) scale(0.6);
+        opacity: 0;
+    }
+}
+
+@keyframes bounce-emoji {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-10px); }
+}
+
+/* Force main content visibility */
+.landing-container {
+    display: flex !important;
+    opacity: 1 !important;
+    z-index: 1000 !important;
+    position: relative !important;
+    min-height: 100vh !important;
+    justify-content: center !important;
+    align-items: center !important;
+}
+
+.hero-section {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    z-index: 1001 !important;
+}
+
+.main-title {
+    display: block !important;
+    opacity: 1 !important;
 }
 `;
 document.head.appendChild(style);
 
 // Initialize the real application
+console.log('🚀 Starting Stranger Face...');
 window.strangerFaceApp = new StrangerFaceApp();
 
 // Cleanup on page unload
 window.addEventListener('beforeunload', () => {
     if (window.strangerFaceApp) {
         window.strangerFaceApp.cleanup();
+    }
+});
+
+// Handle visibility change (when user switches tabs)
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        console.log('👁️ Page hidden');
+    } else {
+        console.log('👁️ Page visible');
     }
 });

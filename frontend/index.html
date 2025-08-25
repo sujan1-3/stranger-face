@@ -5,14 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>👾 Stranger Face 🌍 - Cyberpunk Anime Social Hub</title>
     <meta name="description" content="Meet Strangers. Share Your World. Discover New Passions 🚀✨">
-    
-    <link rel="icon" type="image/x-icon" href="data:image/x-icon;base64,AAABAAEAEBAQAAEABAAoAQAAFgAAACgAAAAQAAAAIAAAAAEABAAAAAAAgAAAAAAAAAAAAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=">
-
 
     <!-- Futuristic Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Favicon fix -->
+    <link rel="icon" type="image/x-icon" href="data:image/x-icon;base64,">
 
     <link rel="stylesheet" href="style.css">
 </head>
@@ -193,11 +193,11 @@
                 <div id="strangerVideo" class="stranger-video">
                     <div class="video-placeholder">
                         <div class="placeholder-icon">🎥</div>
-                        <div class="placeholder-text">Stranger's Video</div>
+                        <div class="placeholder-text">Connecting to stranger...</div>
                     </div>
                 </div>
                 <div class="video-overlay">
-                    <div class="connection-status">🟢 Connected</div>
+                    <div class="connection-status">🟡 Connecting...</div>
                 </div>
             </div>
 
@@ -222,7 +222,7 @@
             </button>
 
             <button id="muteBtn" class="control-btn mute-btn">
-                <span class="btn-icon">🔇</span>
+                <span class="btn-icon">🔊</span>
                 <span class="btn-text">Mute</span>
                 <div class="btn-glow-effect"></div>
             </button>
@@ -250,34 +250,10 @@
         </div>
     </div>
 
-    <!-- Report Modal -->
-    <div id="reportModal" class="modal-overlay" style="display: none;">
-        <div class="modal-container">
-            <div class="modal-header">
-                <h3>⚠️ Report User</h3>
-                <button id="closeReportModal" class="close-btn">×</button>
-            </div>
-            <div class="modal-content">
-                <p>Why are you reporting this user?</p>
-                <select id="reportReason" class="report-select">
-                    <option value="">Select a reason...</option>
-                    <option value="inappropriate_behavior">Inappropriate Behavior</option>
-                    <option value="harassment">Harassment</option>
-                    <option value="nudity">Nudity</option>
-                    <option value="spam">Spam</option>
-                    <option value="underage">Underage User</option>
-                    <option value="violence">Violence</option>
-                    <option value="other">Other</option>
-                </select>
-                <textarea id="reportDescription" placeholder="Additional details (optional)..." class="report-textarea"></textarea>
-            </div>
-            <div class="modal-footer">
-                <button id="cancelReport" class="modal-btn cancel-btn">Cancel</button>
-                <button id="submitReport" class="modal-btn submit-btn">Submit Report</button>
-            </div>
-        </div>
-    </div>
-
+    <!-- Socket.IO Client Library (MUST come first) -->
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+    
+    <!-- Your application script (MUST come after Socket.IO) -->
     <script src="app.js"></script>
 </body>
 </html>
